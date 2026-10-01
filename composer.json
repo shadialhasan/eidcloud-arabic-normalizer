@@ -1,0 +1,44 @@
+{
+  "name": "eidcloud/arabic-normalizer",
+  "description": "Enterprise-grade high-speed Arabic text normalization, diacritics sanitizer, and orthographic harmonizer in pure PHP",
+  "type": "library",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "MHD. Shadi AL-Hasan",
+      "role": "Author & Maintainer"
+    }
+  ],
+  "keywords": [
+    "eidcloud",
+    "arabic-nlp",
+    "text-normalizer",
+    "arabic-language",
+    "orthography",
+    "tashkeel-remover",
+    "php8"
+  ],
+  "require": {
+    "php": ">=8.2"
+  },
+  "autoload": {
+    "psr-4": {
+      "EidCloud\\ArabicNormalizer\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "EidCloud\\ArabicNormalizer\\Tests\\": "tests/"
+    }
+  },
+  "bin": [
+    "bin/eidcloud-ar-norm"
+  ],
+  "scripts": {
+    "test": "php tests/run_tests.php"
+  },
+  "config": {
+    "sort-packages": true
+  },
+  "minimum-stability": "stable"
+}

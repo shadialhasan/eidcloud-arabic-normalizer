@@ -1,0 +1,208 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// Register minimal PSR-4 autoloader for standalone execution without composer install
+spl_autoload_register(function (string $class) {
+    $prefix = 'EidCloud\\ArabicNormalizer\\';
+    $baseDir = dirname(__DIR__) . '/src/';
+
+    $len = strlen($prefix);
+    if (strncmp($prefix, $class, $len) !== 0) {
+        return;
+    }
+
+    $relativeClass = substr($class, $len);
+    $file = $baseDir . str_replace('\\', '/', $relativeClass) . '.php';
+
+    if (file_exists($file)) {
+        require $file;
+    }
+});
+
+use EidCloud\ArabicNormalizer\Normalizer;
+
+function printUsage(): void
+{
+    echo <<<HELP
+\033[1;36m🔤 eidcloud-ar-norm\033[0m - Enterprise Arabic Text Normalizer CLI (EidCloud)
+
+\033[1mUSAGE:\033[0m
+  php bin/eidcloud-ar-norm <command> [arguments] [options]
+
+\033[1mCOMMANDS:\033[0m
+  \033[32mnormalize\033[0m <text>          Normalize a single Arabic string directly.
+  \033[32mclean\033[0m <file>              Clean/normalize an input file (streaming mode).
+  \033[32mextract-tashkeel\033[0m <text>   Extract diacritics and their code points.
+  \033[32mversion\033[0m                   Display library and CLI version.
+
+\033[1mOPTIONS:\033[0m
+  \033[33m--out=<path>\033[0m              Output file path (used with 'clean'). Defaults to stdout.
+  \033[33m--stats\033[0m                   Display processing statistics (line count, throughput).
+  \033[33m--json\033[0m                    Format output as JSON with metadata.
+  \033[33m--numerals=<type>\033[0m         Target numerals: 'western' (0-9), 'eastern' (٠-٩), 'persian' (۰-۹), 'none'.
+  \033[33m--keep-shadda\033[0m             Preserve Shadda (ّ) while stripping other diacritics.
+  \033[33m--keep-tashkeel\033[0m           Do not strip diacritics.
+  \033[33m--keep-tatweel\033[0m            Do not strip Tatweel (Kashida ـ).
+  \033[33m--help, -h\033[0m                Display this help screen.
+
+\033[1mEXAMPLES:\033[0m
+  php bin/eidcloud-ar-norm normalize "النَّصُّ العَرَبِيُّ المُرَادُ تَنْظِيفُهُ"
+  php bin/eidcloud-ar-norm normalize "رقم الهاتف: ٠٥٠١٢٣٤٥٦٧" --numerals=western
+  php bin/eidcloud-ar-norm clean input.txt --out=clean.txt --stats
+  php bin/eidcloud-ar-norm normalize "أحمد ومحمود" --json
+
+HELP;
+}
+
+$argv = $_SERVER['argv'] ?? [];
+array_shift($argv); // Remove script name
+
+if (empty($argv) || in_array('--help', $argv, true) || in_array('-h', $argv, true)) {
+    printUsage();
+    exit(0);
+}
+
+$command = $argv[0] ?? '';
+array_shift($argv);
+
+// Parse flags and positional arguments
+$options = [];
+$positional = [];
+
+foreach ($argv as $arg) {
+    if (str_starts_with($arg, '--out=')) {
+        $options['out'] = substr($arg, 6);
+    } elseif (str_starts_with($arg, '--numerals=')) {
+        $val = substr($arg, 11);
+        $options['numeral_target'] = $val === 'none' ? null : $val;
+    } elseif ($arg === '--stats') {
+        $options['stats'] = true;
+    } elseif ($arg === '--json') {
+        $options['json'] = true;
+    } elseif ($arg === '--keep-shadda') {
+        $options['keep_shadda'] = true;
+    } elseif ($arg === '--keep-tashkeel') {
+        $options['strip_tashkeel'] = false;
+    } elseif ($arg === '--keep-tatweel') {
+        $options['strip_tatweel'] = false;
+    } else {
+        $positional[] = $arg;
+    }
+}
+
+$normalizer = new Normalizer($options);
+
+switch ($command) {
+    case 'version':
+    case '-v':
+    case '--version':
+        echo "eidcloud-ar-norm version " . Normalizer::VERSION . " (PHP " . PHP_VERSION . ")\n";
+        exit(0);
+
+    case 'normalize':
+        if (empty($positional)) {
+            fwrite(STDERR, "\033[31mError: No input text provided for normalization.\033[0m\n");
+            exit(1);
+        }
+        $inputText = implode(' ', $positional);
+        $startTime = microtime(true);
+        $result = $normalizer->normalize($inputText, $options);
+        $duration = microtime(true) - $startTime;
+
+        if (!empty($options['json'])) {
+            echo json_encode([
+                'status' => 'success',
+                'input' => $inputText,
+                'normalized' => $result,
+                'duration_ms' => round($duration * 1000, 3),
+            ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . "\n";
+        } else {
+            echo $result . "\n";
+        }
+        exit(0);
+
+    case 'extract-tashkeel':
+        if (empty($positional)) {
+            fwrite(STDERR, "\033[31mError: No text provided.\033[0m\n");
+            exit(1);
+        }
+        $inputText = implode(' ', $positional);
+        $diacritics = $normalizer->extractDiacritics($inputText);
+
+        if (!empty($options['json'])) {
+            echo json_encode([
+                'status' => 'success',
+                'count' => count($diacritics),
+                'diacritics' => $diacritics,
+            ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . "\n";
+        } else {
+            echo "Found " . count($diacritics) . " diacritic marks:\n";
+            foreach ($diacritics as $d) {
+                echo " - '{$d['char']}' at index {$d['index']} ({$d['codepoint']})\n";
+            }
+        }
+        exit(0);
+
+    case 'clean':
+        if (empty($positional[0])) {
+            fwrite(STDERR, "\033[31mError: No input file provided.\033[0m\n");
+            exit(1);
+        }
+        $inputFile = $positional[0];
+        if (!file_exists($inputFile)) {
+            fwrite(STDERR, "\033[31mError: File not found: {$inputFile}\033[0m\n");
+            exit(1);
+        }
+
+        $inputHandle = fopen($inputFile, 'rb');
+        if (!$inputHandle) {
+            fwrite(STDERR, "\033[31mError: Could not open input file: {$inputFile}\033[0m\n");
+            exit(1);
+        }
+
+        $isFileOutput = !empty($options['out']);
+        if ($isFileOutput) {
+            $outputHandle = fopen($options['out'], 'wb');
+            if (!$outputHandle) {
+                fclose($inputHandle);
+                fwrite(STDERR, "\033[31mError: Could not open output file for writing: {$options['out']}\033[0m\n");
+                exit(1);
+            }
+        } else {
+            $outputHandle = STDOUT;
+        }
+
+        $stats = $normalizer->streamNormalize($inputHandle, $outputHandle, $options);
+
+        fclose($inputHandle);
+        if ($isFileOutput) {
+            fclose($outputHandle);
+        }
+
+        if (!empty($options['json'])) {
+            $log = [
+                'status' => 'success',
+                'input_file' => $inputFile,
+                'output_file' => $options['out'] ?? 'STDOUT',
+                'stats' => $stats,
+            ];
+            echo json_encode($log, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . "\n";
+        } elseif (!empty($options['stats'])) {
+            $mbIn = round($stats['bytes_in'] / (1024 * 1024), 2);
+            $mbOut = round($stats['bytes_out'] / (1024 * 1024), 2);
+            $linesPerSec = $stats['elapsed_sec'] > 0 ? round($stats['lines'] / $stats['elapsed_sec'], 2) : $stats['lines'];
+            fwrite(STDERR, "\n\033[32m=== Processing Statistics ===\033[0m\n");
+            fwrite(STDERR, "Total lines:     " . number_format($stats['lines']) . "\n");
+            fwrite(STDERR, "Bytes processed: {$mbIn} MB -> {$mbOut} MB\n");
+            fwrite(STDERR, "Time elapsed:    {$stats['elapsed_sec']} seconds\n");
+            fwrite(STDERR, "Throughput:      " . number_format($linesPerSec) . " lines/sec\n");
+        }
+        exit(0);
+
+    default:
+        fwrite(STDERR, "\033[31mUnknown command: {$command}\033[0m\n\n");
+        printUsage();
+        exit(1);
+}
